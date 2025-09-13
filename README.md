@@ -136,6 +136,8 @@ res = spci.predict_interval(X_future)   # multi-step (h=1..H)
 # res["lower"][h-1], res["center"][h-1], res["upper"][h-1] para cada horizonte
 ```
 
+---
+
 ### Usando seu modelo base treinado
 
 **Recomendado (fiel ao método):** reusar apenas os **hiperparâmetros**, deixando o SPCI treinar o ensemble bootstrap:
@@ -154,7 +156,6 @@ res = spci.predict_interval(X_test, y_true=y_test)
 > **Observação:** se você **precisar** usar exatamente o modelo já treinado sem re-treinar, dá para montar um *wrapper* “congelado” e usar `B=1`. Funciona, mas **não** produz resíduos LOO e **enfraquece as garantias**. Prefira o procedimento acima.
 ---
 
----
 
 ## Exemplo (opcional): heterocedasticidade com MLP e $$\sigma(X)$$
 
