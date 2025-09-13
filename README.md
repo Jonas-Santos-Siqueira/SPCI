@@ -176,9 +176,6 @@ Cada script imprime cobertura empírica e largura média do intervalo.
 
 ---
 
-## Citação
+## Referências
 
-Se usar este pacote em trabalhos acadêmicos/relatórios, cite o artigo original do SPCI e o repositório deste pacote. Exemplo:
-
-> *Autores do SPCI*. **Sequential Predictive Conformal Inference for Time Series**. (Ano/venue conforme artigo).  
-> *Este pacote*: SPCI (implementação fiel, QRF-first), URL do seu repositório.
+Xu, Chen, and Yao Xie. "Sequential predictive conformal inference for time series." International Conference on Machine Learning. PMLR, 2023.
