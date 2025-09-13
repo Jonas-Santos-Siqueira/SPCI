@@ -1,56 +1,77 @@
+# SPDX-License-Identifier: MIT
 import numpy as np
-_BACKEND = None
-_SkQRF = None
-_RangerQRF = None
+
+# Try to import a quantile RF implementation compatible with authors' code
+_QRF_BACKEND = None
 try:
     from sklearn_quantile import RandomForestQuantileRegressor as _SkQRF
-    _BACKEND = "sklearn_quantile"
+    _QRF_BACKEND = "sklearn_quantile"
 except Exception:
     try:
+        # skranger exposes quantile predictions via predict with quantiles=True
         from skranger.ensemble import RangerForestRegressor as _RangerQRF
-        _BACKEND = "skranger"
+        _QRF_BACKEND = "skranger"
     except Exception:
-        _BACKEND = None
+        _QRF_BACKEND = None
+
+from sklearn.neighbors import NearestNeighbors
 
 class QRFQuantileRegressor:
+    """
+    Wrapper offering a unified API:
+    - fit(X, y, sample_weight=None)
+    - predict_quantiles(X_new, quantiles=[...]) -> (n, len(quantiles))
+    Prefers sklearn-quantile, falls back to skranger if available.
+    """
     def __init__(self, n_estimators=200, random_state=0, **kwargs):
-        if _BACKEND is None:
-            raise ImportError("No QRF backend available. Install 'sklearn-quantile' or 'skranger'.")
-        self.backend = _BACKEND
-        self.n_estimators = int(n_estimators)
-        self.random_state = int(random_state)
+        self.n_estimators = n_estimators
+        self.random_state = random_state
         self.kwargs = kwargs
-        if self.backend == "sklearn_quantile":
-            self.model = _SkQRF(n_estimators=self.n_estimators, random_state=self.random_state, **kwargs)
-        elif self.backend == "skranger":
-            self.model = _RangerQRF(num_trees=self.n_estimators, random_state=self.random_state, quantiles=True, **kwargs)
+        if _QRF_BACKEND is None:
+            raise ImportError("No QRF backend found. Install 'sklearn-quantile' or 'skranger'.")
+        if _QRF_BACKEND == "sklearn_quantile":
+            self.model = _SkQRF(n_estimators=n_estimators, random_state=random_state, **kwargs)
+        elif _QRF_BACKEND == "skranger":
+            self.model = _RangerQRF(num_trees=n_estimators, random_state=random_state, quantiles=True, **kwargs)
+
     def fit(self, X, y, sample_weight=None):
-        if self.backend == "sklearn_quantile":
+        if _QRF_BACKEND == "sklearn_quantile":
             return self.model.fit(X, y, sample_weight=sample_weight)
-        else:
+        elif _QRF_BACKEND == "skranger":
+            # skranger doesn't support sample_weight for quantiles
             return self.model.fit(X, y)
+
     def predict_quantiles(self, X, quantiles):
-        q = np.asarray(quantiles, float)
-        return self.model.predict(X, quantiles=q)
+        qs = np.asarray(quantiles, dtype=float)
+        if _QRF_BACKEND == "sklearn_quantile":
+            return self.model.predict(X, quantiles=qs)
+        elif _QRF_BACKEND == "skranger":
+            # skranger returns (n, n_quantiles) when predict with specified quantiles
+            return self.model.predict(X, quantiles=qs)
 
 class KNNQuantileRegressor:
+    """
+    Simple KNN-based quantile predictor used as a fallback when QRF is unavailable.
+    Not in the original paper, but useful for environments without QRF deps.
+    API mirrors QRFQuantileRegressor.
+    """
     def __init__(self, n_neighbors=50):
-        self.k = int(n_neighbors)
-        self.X_ = None; self.y_ = None
+        self.k = n_neighbors
+        self.nn = NearestNeighbors(n_neighbors=self.k, algorithm="auto")
+        self.y = None
+        self.X = None
+
     def fit(self, X, y, sample_weight=None):
-        X = np.asarray(X, float); y = np.asarray(y, float).ravel()
-        if X.ndim == 1: X = X.reshape(-1, 1)
-        self.X_, self.y_ = X, y
+        self.X = np.asarray(X)
+        self.y = np.asarray(y).reshape(-1)
+        self.nn.fit(self.X)
         return self
+
     def predict_quantiles(self, X, quantiles):
-        X = np.asarray(X, float)
-        if X.ndim == 1: X = X.reshape(1, -1)
-        qs = np.atleast_1d(quantiles)
-        out = np.zeros((X.shape[0], len(qs)), dtype=float)
-        for i, x in enumerate(X):
-            d = np.linalg.norm(self.X_ - x, axis=1)
-            idx = np.argsort(d)[:max(1, self.k)]
-            vals = self.y_[idx]
-            for j, q in enumerate(qs):
-                out[i, j] = np.quantile(vals, q)
+        X = np.asarray(X)
+        idx = self.nn.kneighbors(X, return_distance=False)
+        # compute empirical quantiles of neighbors' targets
+        out = np.zeros((X.shape[0], len(quantiles)), dtype=float)
+        for i, q in enumerate(quantiles):
+            out[:, i] = np.quantile(self.y[idx], q, axis=1, method="linear")
         return out
