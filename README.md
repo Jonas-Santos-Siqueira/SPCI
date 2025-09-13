@@ -197,9 +197,7 @@ print("Cobertura:", ((y_te >= res['lower']) & (y_te <= res['upper'])).mean())
 ## Referências
 
 Se este pacote for útil na sua pesquisa, **por favor, cite**:
-
-### Este pacote
-**Texto (ABNT/APA):**  
+ 
 > *SPCI (Python): Sequential Predictive Conformal Inference.* Repositório GitHub, 2025. Disponível em: **https://github.com/Jonas-Santos-Siqueira/SPCI**.
 
 **BibTeX (substitua os campos em maiúsculas):**
