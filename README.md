@@ -64,6 +64,7 @@ m.fit(X_tr, y_tr)
 # Predição sequencial com feedback (atualiza resíduos on-line)
 res = m.predict_interval(X_te, y_true=y_te)
 lb, ub, center = res["lower"], res["upper"], res["center"]
+
 print("Cobertura empírica:", np.mean((y_te >= lb) & (y_te <= ub)))
 print("Largura média:", np.mean(ub - lb))
 ```
@@ -84,7 +85,6 @@ SPCI(
   fit_sigmaX=False,  # se base_model="mlp": ativa MLP separada para σ(X) (heterocedasticidade)
   random_state=0
 )
-
 .fit(X_train, y_train)                 # treina ensemble e calcula resíduos LOO
 .predict_interval(X_future, y_true)    # constrói intervalos; se y_true é passado, atualiza resíduos online
 ```
@@ -117,7 +117,9 @@ X_te, y_te = X[180:], y[180:]
 # passa o estimador sklearn como base_model
 m = SPCI(base_model=LinearRegression(), B=40, alpha=0.1, w=25, bins=5, random_state=1)
 m.fit(X_tr, y_tr)
+
 res = m.predict_interval(X_te, y_true=y_te)
+
 print("Cobertura:", ((y_te >= res["lower"]) & (y_te <= res["upper"])).mean())
 ```
 
@@ -142,7 +144,9 @@ X_te, y_te = X[400:], y[400:]
 
 m = SPCI(base_model="mlp", fit_sigmaX=True, B=20, alpha=0.1, w=30, bins=7, random_state=0)
 m.fit(X_tr, y_tr)
+
 res = m.predict_interval(X_te, y_true=y_te)
+
 print("Cobertura:", ((y_te >= res['lower']) & (y_te <= res['upper'])).mean())
 ```
 
