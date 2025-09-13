@@ -1,182 +1,166 @@
-# SPCI — Sequential Predictive Conformal Inference
+# SPCI — Sequential Predictive Conformal Inference (Time Series)
 
-Este repositório implementa o **SPCI** conforme o artigo dos autores (SPCI: *Sequential Predictive Conformal Inference for Time Series*):
-- **Resíduos LOO (leave-one-out) via bagging**: treinamos `B` modelos base em *bootstrap* e, para cada ponto de treino, agregamos **apenas** os modelos que **não** viram o ponto (OOB) para obter os resíduos de calibração.
-- **Regressão de quantis condicional nos resíduos passados** usando **Quantile Random Forest (QRF)**. O modelo aprende `Q̂_t(p | ε̂_{t-1},…,ε̂_{t-w})` com uma janela AR de resíduos de tamanho `w`.
-- **Otimização de β ∈ [0, α]**: a cada passo, escolhemos `β̂` que **minimiza a largura** do intervalo `[Q̂_t(β), Q̂_t(1−α+β)]`, mantendo cobertura alvo `1−α` (equações (10)–(11) do paper).
-- **Atualização online**: quando `y_t` é observado, atualizamos a lista de resíduos e **recalibramos** os intervalos dinamicamente.
-- **Multi-step**: sem `y_true`, para um bloco futuro de tamanho `H` calculamos intervalos para horizontes `h=1..H` usando **modelos quantílicos horizonte-específicos** (estratégia “divide-and-conquer” do paper).
-
-> **Backends de QRF suportados:** `sklearn-quantile` (preferido) ou `skranger`. Se nenhum estiver disponível, há um **fallback KNN** (apenas para smoke test). Para resultados fiéis ao artigo, instale um backend QRF.
+> Implementação em Python com API simples (estilo *statsmodels*) do método **SPCI** — *Sequential Predictive Conformal Inference for Time Series* (Xu & Xie).  
+> Constrói **intervalos de predição conformais** sequenciais, **adaptados no tempo**, a partir de:
+> 1) um **preditor pontual** obtido por *bagging* (resíduos **LOO/OOB** no treino), e  
+> 2) uma **regressão de quantis condicional** sobre janelas de **resíduos passados**, recalibrada a cada passo.
 
 ---
 
-## Sumário
-- [Instalação](#instalação)
-- [Ideia do método (resumo do artigo)](#ideia-do-método-resumo-do-artigo)
-- [API](#api)
-- [Exemplos de uso](#exemplos-de-uso)
-  - [Online (1 passo à frente, com atualização)](#online-1-passo-à-frente-com-atualização)
-  - [Multi-step (H passos à frente)](#multi-step-h-passos-à-frente)
-  - [Usando seu modelo base treinado](#usando-seu-modelo-base-treinado)
-- [Smoke tests](#smoke-tests)
-- [Práticas recomendadas](#práticas-recomendadas)
-- [Limitações e notas](#limitações-e-notas)
-- [Referências](#referências)
+## Ideia do método (conforme o artigo)
+
+Para prever \(Y_t\) dado \(X_t\):
+
+1. **Preditor pontual \(\hat f\)** (bagging): treine \(B\) modelos-base via **bootstrap** e, para cada ponto do treino, compute **previsões *leave-one-out*** (agregando apenas os modelos que **não** viram aquele ponto). Os **resíduos LOO** são \(\hat\varepsilon_i = y_i - \hat f_{-i}(x_i)\).  
+2. **Janela de resíduos**: mantenha um histórico \(\ldots,\hat\varepsilon_{t-w},\dots,\hat\varepsilon_{t-1}\) de tamanho \(w\).
+3. **Quantis condicionais**: ajuste uma **regressão de quantis** (ex.: **QRF – Random Forest Quantílico**) para aprender o mapeamento
+   \[ [\hat\varepsilon_{u+w-1},\dots,\hat\varepsilon_u] \longmapsto \hat\varepsilon_{u+w} \]
+   e **estime** \(Q_t(p)\), o \(p\)-quantil **condicional** do próximo resíduo, **dado a janela atual**.
+4. **Escolha adaptativa de \(\beta\)**: construa o intervalo
+   \[ C_{t-1}(X_t) = \big[\ \hat f(X_t) + Q_t(\beta)\ ,\ \hat f(X_t) + Q_t(1-\alpha+\beta)\ \big], \]
+   escolhendo \(\beta \in [0,\alpha]\) que **minimiza a largura** \(\,Q_t(1-\alpha+\beta)-Q_t(\beta)\,\).  
+   (Quando a distribuição do erro é assimétrica, deslocar \(\beta\) reduz a largura mantendo cobertura \(1-\alpha\).)
+5. **Atualização online**: após observar \(y_t\), **atualize** o histórico de resíduos com \( \hat\varepsilon_t = y_t - \hat f(X_t) \) (ou padronizado por \(\hat\sigma(X_t)\) quando modelado), e repita.
+
+> No paper, este fluxo aparece como **Algoritmo 1** (predição 1-passo), com fórmulas (10)–(11) para a escolha de \(\beta\) e (13) para a construção das **features** de regressão quantílica (janelas dos resíduos).
 
 ---
 
 ## Instalação
 
-Crie um ambiente e instale as dependências. **Escolha um backend QRF**:
+O pacote é puro Python; para usar **QRF** (Random Forest Quantílico) — recomendado — instale uma das opções:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate     # no Windows: .venv\Scripts\activate
-pip install -U pip wheel setuptools numpy scipy scikit-learn
-
-# Backend QRF (escolha UM; recomendado)
-pip install sklearn-quantile            # preferido
+pip install sklearn-quantile    # (recomendado)
 # ou
-pip install skranger                    # alternativa
-
-# Instale o pacote (modo editável)
-pip install -e .
+pip install skranger            # alternativa com quantis
 ```
 
-> Se nenhum backend QRF estiver instalado, o pacote usará **KNN quantile** como fallback — útil para teste rápido, mas **não é** a configuração fiel ao artigo.
+Se não houver backend de QRF disponível, a biblioteca usa um **fallback KNN** simples para quantis.
 
 ---
 
-## Ideia do método (resumo do artigo)
+## Exemplo rápido (RF base + QRF condicional)
 
-1) **Preditor pontual f̂(X)** via **ensemble bootstrap** (`B` modelos). No treino, para cada observação `i`, agregamos as previsões **apenas** dos modelos que **não** usaram `i` (OOB) ⇒ obtemos o **resíduo LOO** `ε̂_i = y_i − f̂_{−i}(X_i)`.
+```python
+import numpy as np
+from spci import SPCI
 
-2) **Quantis condicionais do resíduo futuro**: montamos uma **janela de resíduos** tamanho `w` e treinamos uma **QRF** para prever `ε̂_{t+1}` a partir de `[ε̂_{t}, ε̂_{t-1}, …, ε̂_{t-w+1}]`. Isso captura dependência temporal e heterocedasticidade.
+# dados sintéticos (tabulares para ilustração)
+rng = np.random.default_rng(0)
+n = 300
+X = rng.normal(size=(n, 5))
+beta = np.array([1.2, -0.8, 0.0, 0.5, 0.0])
+y = X @ beta + rng.standard_t(df=4, size=n) * 0.7  # erros assimétricos/heavy-tail
 
-3) **Intervalo com β ótimo**: em vez de usar um intervalo central simétrico, escolhemos `β̂ ∈ [0, α]` que **minimiza a largura** `Q̂_t(1−α+β) − Q̂_t(β)`, garantindo cobertura `1−α` e **estreitando** o intervalo quando há assimetria nos erros.
+# split
+X_tr, y_tr = X[:220], y[:220]
+X_te, y_te = X[220:], y[220:]
 
-4) **Atualização online**: após prever `Y_t`, quando `y_t` é observado, **atualizamos** a lista de resíduos com `ε̂_t` (e opcionalmente usamos uma janela deslizante), **reajustando** a QRF a cada passo.
+# SPCI (preditor pontual RF com bagging interno; QRF para quantis condicionais)
+m = SPCI(base_model="rf", B=30, alpha=0.1, w=30, bins=7, random_state=0)
+m.fit(X_tr, y_tr)
 
-5) **Multi-step** (`H>1`): treinamos **modelos quantílicos por horizonte** (para `h=1..H`) sobre pares defasados de resíduos e produzimos `H` intervalos simultaneamente.
+# Predição sequencial com feedback (atualiza resíduos on-line)
+res = m.predict_interval(X_te, y_true=y_te)
+lb, ub, center = res["lower"], res["upper"], res["center"]
+print("Cobertura empírica:", np.mean((y_te >= lb) & (y_te <= ub)))
+print("Largura média:", np.mean(ub - lb))
+```
 
 ---
 
-## API
+## API essencial
 
 ```python
 from spci import SPCI
 
 SPCI(
-    base_model="rf",     # (obj sklearn-like ou "rf") preditor pontual f̂; usado no ensemble bootstrap
-    B=30,                # nº de modelos bootstrap para f̂
-    alpha=0.1,           # 1 - cobertura alvo
-    w=20,                # janela (lags) de resíduos para a QRF
-    bins=5,              # nº de candidatos de β em [0, α] (malha para min. de largura)
-    qrf_backend="auto",  # "auto" usa QRF (sklearn-quantile/skranger); "knn" força fallback KNN
-    random_state=0
+  base_model="rf",   # "rf" (RF interno), "mlp" (usa PyTorch) ou um estimador sklearn-like
+  B=30,              # nº de modelos no ensemble (bagging) para resíduos LOO
+  alpha=0.1,         # 1 - cobertura alvo
+  w=20,              # tamanho da janela de resíduos para a regressão de quantis
+  bins=5,            # nº de candidatos β em [0, α] para minimizar a largura
+  fit_sigmaX=False,  # se base_model="mlp": ativa MLP separada para σ(X) (heterocedasticidade)
+  random_state=0
 )
+
+.fit(X_train, y_train)                 # treina ensemble e calcula resíduos LOO
+.predict_interval(X_future, y_true)    # constrói intervalos; se y_true é passado, atualiza resíduos online
 ```
 
-- **`.fit(X, y)`**: treina o ensemble bootstrap e calcula resíduos LOO de calibração.
-- **`.predict_interval(X_new, y_true=None)`**:
-  - Se `y_true` for `None`: modo **multi-step** — para `H=len(X_new)`, retorna `H` intervalos (horizonte-específicos).
-  - Se `y_true` for fornecido: modo **online (1 passo)** — atualiza os resíduos a cada passo.
-
-**Retorno:** `dict` com `{"lower": np.ndarray, "upper": np.ndarray, "center": np.ndarray}` (tamanhos `(H,)`).
+### Parâmetros principais
+- **`base_model`**:  
+  - `"rf"`: usa RandomForestRegressor como preditor pontual;  
+  - `"mlp"`: usa MLP (PyTorch) e, com `fit_sigmaX=True`, ajusta **σ(X)** (rede MLP com saída positiva) para **padronizar resíduos**;  
+  - estimador sklearn-like (p.ex. `LinearRegression()`), desde que tenha `.fit/.predict`.
+- **`w`** (*window*): tamanho da janela de resíduos para as **features** da QRF (Eq. 13).  
+- **`bins`**: nº de pontos na malha \([0,\alpha]\) para buscar \(\beta\) que minimiza a largura (Eqs. 10–11).  
+- **`B`**: nº de modelos no *bagging* para gerar resíduos **LOO** (via amostras bootstrap).
 
 ---
 
-## Exemplos de uso
-
-### Online (1 passo à frente, com atualização)
+## Exemplo: uso com estimador do scikit-learn (LinearRegression)
 
 ```python
 import numpy as np
 from sklearn.linear_model import LinearRegression
 from spci import SPCI
 
-rng = np.random.default_rng(0)
-n = 400
-X = rng.normal(size=(n, 5))
-beta = rng.normal(size=(5,))
-y = X @ beta + 0.4*rng.standard_t(df=5, size=n)
+rng = np.random.default_rng(1)
+X = rng.normal(size=(240, 4))
+y = X @ np.array([0.9, -0.4, 0.0, 0.2]) + rng.normal(scale=0.6, size=240)
 
-spci = SPCI(base_model=LinearRegression(),
-            B=30, alpha=0.1, w=20, bins=7, qrf_backend="auto", random_state=0)
+X_tr, y_tr = X[:180], y[:180]
+X_te, y_te = X[180:], y[180:]
 
-spci.fit(X[:320], y[:320])
-res = spci.predict_interval(X[320:], y_true=y[320:])   # online (atualiza resíduos)
-
-lower, upper, center = res["lower"], res["upper"], res["center"]
-print("Cobertura empírica:", np.mean((y[320:] >= lower) & (y[320:] <= upper)))
+# passa o estimador sklearn como base_model
+m = SPCI(base_model=LinearRegression(), B=40, alpha=0.1, w=25, bins=5, random_state=1)
+m.fit(X_tr, y_tr)
+res = m.predict_interval(X_te, y_true=y_te)
+print("Cobertura:", ((y_te >= res["lower"]) & (y_te <= res["upper"])).mean())
 ```
 
-### Multi-step (H passos à frente)
+---
 
-Quando você tem um bloco futuro de tamanho `H` e **não** observa `y_true` durante a previsão:
+## Exemplo (opcional): heterocedasticidade com MLP e $$\sigma(X)$$
+
+> Requer **PyTorch**: `pip install torch`
 
 ```python
-H = 12
-X_future = X[-H:]
+import numpy as np
+from spci import SPCI
 
-res = spci.predict_interval(X_future)   # multi-step (h=1..H)
-res["lower"][h-1], res["center"][h-1], res["upper"][h-1] para cada horizonte
+rng = np.random.default_rng(2)
+n = 500
+X = rng.normal(size=(n, 6))
+sigma = 0.3 + 0.8 * (X[:, 0] > 0)       # variância condicional dependente de X
+y = (X @ np.array([0.7,0,0.3,0,0,0])) + rng.normal(scale=sigma)
+
+X_tr, y_tr = X[:400], y[:400]
+X_te, y_te = X[400:], y[400:]
+
+m = SPCI(base_model="mlp", fit_sigmaX=True, B=20, alpha=0.1, w=30, bins=7, random_state=0)
+m.fit(X_tr, y_tr)
+res = m.predict_interval(X_te, y_true=y_te)
+print("Cobertura:", ((y_te >= res['lower']) & (y_te <= res['upper'])).mean())
 ```
 
-### Usando seu modelo base treinado
-
-**Recomendado (fiel ao método):** reusar apenas os **hiperparâmetros**, deixando o SPCI treinar o ensemble bootstrap:
-
-```python
-from sklearn.base import clone
-
-trained = ...                     # seu estimador já treinado
-base_unfitted = clone(trained)    # clona hiperparâmetros, zera os pesos
-
-spci = SPCI(base_model=base_unfitted, B=30, alpha=0.1, w=20, qrf_backend="auto", random_state=0)
-spci.fit(X_train, y_train)
-res = spci.predict_interval(X_test, y_true=y_test)
-```
-
-> **Observação:** se você **precisar** usar exatamente o modelo já treinado sem re-treinar, dá para montar um *wrapper* “congelado” e usar `B=1`. Funciona, mas **não** produz resíduos LOO e **enfraquece as garantias**. Prefira o procedimento acima.
-
 ---
 
-## Smoke tests
+## Notas práticas
 
-- **QRF real (recomendado):** garante que você está de fato usando `sklearn-quantile`/`skranger`.
-  ```bash
-  python smoke_test_qrf.py
-  ```
-
-- **Fallback KNN (apenas para ambientes sem QRF):**
-  ```bash
-  python smoke_test_knn.py
-  ```
-
-Cada script imprime cobertura empírica e largura média do intervalo.
-
----
-
-## Práticas recomendadas
-
-- **Escolha de `w` (tamanho da janela):** use valores que capturem a memória relevante dos resíduos (e.g., 20–100). Valide por *backtesting*.
-- **`B` (ensemble bootstrap):** 20–50 costuma estabilizar o centro f̂ e os resíduos LOO.
-- **Grade de `β` (`bins`):** 5–11 pontos entre `[0, α]` é um bom começo; aumente se notar assimetria forte.
-- **QRF backend:** para fidelidade ao paper, **instale `sklearn-quantile`** (ou `skranger`). O fallback KNN é para teste apenas.
-- **Reprodutibilidade:** fixe `random_state` e, se possível, fixe seeds globais das libs usadas.
-- **Validação:** monitore cobertura realizada vs. alvo `1−α`; ajuste `w`, `bins` e hiperparâmetros do preditor pontual.
-
----
-
-## Limitações e notas
-
-- **Sigma(X) heterocedástico (MLP):** esta *build* QRF-first **não** inclui a estimação explícita de `σ(X)` por MLP (variante presente em outra build fiel com PyTorch). Posso integrar essa trilha aqui se desejar (mantendo fidelidade).
-- **Backends QRF de terceiros:** implementações podem diferir sutilmente no cálculo de quantis; versões distintas podem levar a pequenas variações nos números.
-- **Inputs:** a API espera `X` como `array (n, d)` e `y` como `(n,)` (ou `(n,1)`).
+- **QRF vs. KNN**: para resultados como no artigo, use **QRF** (`sklearn-quantile` ou `skranger`). O **KNN** é apenas um *fallback* leve.  
+- **Escolha de `w`**: 20–100 costuma funcionar; ajuste pela dependência temporal dos resíduos.  
+- **`bins`** (β): mais pontos \(\Rightarrow\) busca mais fina, porém mais custo; 5–11 é um bom ponto de partida.  
+- **Cobertura simultânea (multi-passos)**: para vários passos à frente, a formulação do paper sugere modelos por horizonte (Apênd. B.3). Esta implementação prioriza o **caso 1-passo** (Alg. 1).  
+- **Desbalanceamento/Drift**: use janelas menores (`w`) para reagir mais rápido a mudanças; considere ponderação temporal no QRF se necessário (custom).
 
 ---
 
 ## Referências
 
-Xu, Chen, and Yao Xie. "Sequential predictive conformal inference for time series." International Conference on Machine Learning. PMLR, 2023.
+- **Xu, Chen, and Yao Xie.** *"Sequential predictive conformal inference for time series."* International Conference on Machine Learning. PMLR, 2023.
+- **Xu, Chen, and Yao Xie.** *"Conformal prediction for time series."* IEEE transactions on pattern analysis and machine intelligence 45.10 (2023): 11575-11587.
+
+---
