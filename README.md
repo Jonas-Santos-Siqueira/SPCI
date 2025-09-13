@@ -125,6 +125,37 @@ print("Cobertura:", ((y_te >= res["lower"]) & (y_te <= res["upper"])).mean())
 
 ---
 
+### Multi-step (H passos à frente)
+
+Quando você tem um bloco futuro de tamanho `H` e **não** observa `y_true` durante a previsão:
+
+```python
+H = 12
+X_future = X[-H:]
+res = spci.predict_interval(X_future)   # multi-step (h=1..H)
+# res["lower"][h-1], res["center"][h-1], res["upper"][h-1] para cada horizonte
+```
+
+### Usando seu modelo base treinado
+
+**Recomendado (fiel ao método):** reusar apenas os **hiperparâmetros**, deixando o SPCI treinar o ensemble bootstrap:
+
+```python
+from sklearn.base import clone
+
+trained = ...                     # seu estimador já treinado
+base_unfitted = clone(trained)    # clona hiperparâmetros, zera os pesos
+
+spci = SPCI(base_model=base_unfitted, B=30, alpha=0.1, w=20, qrf_backend="auto", random_state=0)
+spci.fit(X_train, y_train)
+res = spci.predict_interval(X_test, y_true=y_test)
+```
+
+> **Observação:** se você **precisar** usar exatamente o modelo já treinado sem re-treinar, dá para montar um *wrapper* “congelado” e usar `B=1`. Funciona, mas **não** produz resíduos LOO e **enfraquece as garantias**. Prefira o procedimento acima.
+---
+
+---
+
 ## Exemplo (opcional): heterocedasticidade com MLP e $$\sigma(X)$$
 
 > Requer **PyTorch**: `pip install torch`
