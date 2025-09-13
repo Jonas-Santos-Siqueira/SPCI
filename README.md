@@ -196,7 +196,50 @@ print("Cobertura:", ((y_te >= res['lower']) & (y_te <= res['upper'])).mean())
 
 ## Referências
 
-- **Xu, Chen, and Yao Xie.** *"Sequential predictive conformal inference for time series."* International Conference on Machine Learning. PMLR, 2023.
-- **Xu, Chen, and Yao Xie.** *"Conformal prediction for time series."* IEEE transactions on pattern analysis and machine intelligence 45.10 (2023): 11575-11587.
+Se este pacote for útil na sua pesquisa, **por favor, cite**:
 
+### Este pacote
+**Texto (ABNT/APA):**  
+> *SPCI (Python): Sequential Predictive Conformal Inference.* Repositório GitHub, 2025. Disponível em: **https://github.com/Jonas-Santos-Siqueira/SPCI**.
+
+**BibTeX (substitua os campos em maiúsculas):**
+```bibtex
+@software{SPCI_Python,
+  title   = {SPCI (Python): Sequential Predictive Conformal Inference},
+  author  = {Autor do repositório},
+  year    = {2025},
+  version = {X.Y.Z},
+  url     = {URL_DO_REPO},
+  note    = {Python package}
+}
+```
+
+### Artigo oficial (SPCI)
+**Texto (APA):**  
+> Xu, C., & Xie, Y. (2023). *Sequential Predictive Conformal Inference for Time Series*.
+
+**BibTeX (mínimo):**
+```bibtex
+@article{XuXieSPCI2023,
+  title   = {Sequential Predictive Conformal Inference for Time Series},
+  author  = {Xu, Chen and Xie, Yao},
+  year    = {2023}
+}
+```
+
+> **Opcional:** como SPCI se apoia no EnbPI, considere citar também:  
+> Xu, C., & Xie, Y. (2021). *Conformal Prediction Interval for Dynamic Time-Series* (EnbPI).
+```bibtex
+@inproceedings{XuXieEnbPI2021,
+  title     = {Conformal Prediction Interval for Dynamic Time-Series},
+  author    = {Xu, Chen and Xie, Yao},
+  booktitle = {Proceedings of the 38th International Conference on Machine Learning},
+  year      = {2021}
+}
+```
+
+---
+
+## Licença
+MIT
 ---
