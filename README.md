@@ -118,8 +118,9 @@ Quando você tem um bloco futuro de tamanho `H` e **não** observa `y_true` dura
 ```python
 H = 12
 X_future = X[-H:]
+
 res = spci.predict_interval(X_future)   # multi-step (h=1..H)
-# res["lower"][h-1], res["center"][h-1], res["upper"][h-1] para cada horizonte
+res["lower"][h-1], res["center"][h-1], res["upper"][h-1] para cada horizonte
 ```
 
 ### Usando seu modelo base treinado
