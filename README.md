@@ -239,9 +239,3 @@ Se este pacote for útil na sua pesquisa, **por favor, cite**:
 ```
 
 ---
-
-## Licença
-
-MIT
-
----
