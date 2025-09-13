@@ -22,7 +22,7 @@ Este repositório implementa o **SPCI** conforme o artigo dos autores (SPCI: *Se
 - [Smoke tests](#smoke-tests)
 - [Práticas recomendadas](#práticas-recomendadas)
 - [Limitações e notas](#limitações-e-notas)
-- [Citação](#citação)
+- [Referências](#referências)
 
 ---
 
